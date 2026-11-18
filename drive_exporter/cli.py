@@ -1,6 +1,7 @@
 """Línea de comandos: python -m drive_exporter [opciones]"""
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -43,12 +44,59 @@ def folder_id_from(value: str) -> str:
     return m.group(1) if m else value.strip()
 
 
-def find_credentials(path):
+CONFIG_FILE = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~/.config"), "drive-exporter", "config.json")
+
+
+def _load_config():
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_config(cfg):
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+    with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, indent=2, ensure_ascii=False)
+
+
+def _looks_like_credentials(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return isinstance(data, dict) and ("installed" in data or "web" in data)
+    except (OSError, ValueError):
+        return False
+
+
+def find_credentials(path, interactive=False):
+    """Busca credentials.json: opción --credenciales, la ruta recordada, la carpeta actual
+    y la del programa. Si no está y hay alguien delante, lo pide una vez y lo recuerda."""
     if path:
         return path
-    for cand in (os.path.join(os.getcwd(), "credentials.json"), os.path.join(HERE, "credentials.json")):
-        if os.path.exists(cand):
+    remembered = _load_config().get("credenciales")
+    cands = [remembered] if remembered else []
+    cands += [os.path.join(os.getcwd(), "credentials.json"), os.path.join(HERE, "credentials.json")]
+    for cand in cands:
+        if cand and os.path.exists(cand):
             return cand
+    if interactive:
+        print("\nNo encuentro tus credenciales de Google (credentials.json).")
+        print("Arrastra el archivo a esta ventana (o pega su ruta) y pulsa Enter.")
+        print("Solo se pide una vez: la ruta queda guardada en " + CONFIG_FILE)
+        while True:
+            given = input("credentials.json: ").strip().strip('"').strip("'").strip()
+            if not given:
+                break
+            if os.path.isdir(given):
+                given = os.path.join(given, "credentials.json")
+            if _looks_like_credentials(given):
+                cfg = _load_config()
+                cfg["credenciales"] = os.path.abspath(given)
+                _save_config(cfg)
+                return os.path.abspath(given)
+            print("Ese archivo no parece un credentials.json de Google (descárgalo de Google Cloud: ver README). Prueba otra vez o pulsa Enter para salir.")
     return os.path.join(os.getcwd(), "credentials.json")
 
 
@@ -132,7 +180,7 @@ def main(argv=None):
     log.open(os.path.join(out_dir, ".drive-exporter", "registro.log"))
 
     from .api import SCOPE_FULL, SCOPE_READONLY, DriveClient, authenticate
-    creds_file = find_credentials(args.credenciales)
+    creds_file = find_credentials(args.credenciales, interactive=sys.stdin.isatty())
     creds_dir = os.path.dirname(os.path.abspath(creds_file))
     if args.mandar_a_papelera:
         scopes, token = [SCOPE_FULL], os.path.join(creds_dir, "token_escritura.json")
