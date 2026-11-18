@@ -1,9 +1,10 @@
-# Credenciales y token de Google: NUNCA subir
+# Credenciales y tokens de Google: NUNCA subir
 credentials.json
-token.json
+token*.json
 
 # Datos personales y archivos generados
 exports/
 progress.json
 export_log.txt
 __pycache__/
+.pytest_cache/

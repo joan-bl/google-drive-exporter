@@ -1,326 +1,156 @@
-# 📦 Google Drive Folder Exporter
+# 📦 Google Drive Exporter
 
-Script en Python para **exportar archivos de Google Drive** (Docs, Sheets, Slides) a formatos estándar (.docx, .xlsx, .pptx) y, opcionalmente, **mandar los originales a la papelera** de Drive.
+Copia **todo tu Google Drive al ordenador**, ordenado y con sus fechas, sin el lío de los zips de Google Takeout.
 
----
+- **Todo**: *Mi unidad*, *Compartido conmigo* y las *unidades compartidas*, cada una en su carpeta.
+- **Docs, Hojas y Presentaciones convertidos** a Word, Excel y PowerPoint (o PDF, ODT, Markdown…, incluso varios a la vez).
+- **Fechas originales**: cada archivo conserva la fecha de modificación de Drive (y en Windows también la de creación). Así puedes ordenar por fecha en el Explorador.
+- **Accesos directos resueltos**: si en Mi unidad tienes un acceso a una carpeta compartida, se baja la carpeta de verdad en ese sitio, una sola vez.
+- **Sin choques de nombres**: dos archivos que se llaman igual no se machacan (`foto.jpg` y `foto (2).jpg`).
+- **Reanudable e incremental**: si se corta, sigue donde estaba. Si lo vuelves a ejecutar meses después, solo baja lo nuevo o lo cambiado, y si renombraste algo en Drive lo renombra también en tu disco.
+- **Comprobado**: verifica la suma MD5 de cada archivo descargado.
+- **Índice con todo**: un `_informe.html` que se puede buscar y ordenar por fecha, y un `_indice.csv` para Excel. Incluye lo que no se pudo bajar y por qué (formularios, archivos con la descarga desactivada…).
+- **Solo lectura**: pide a Google permiso **solo para leer**. No toca nada de tu Drive (salvo que actives a propósito `--mandar-a-papelera`).
 
-## 🎯 ¿Qué hace este proyecto?
+## ¿Por qué no Google Takeout?
 
-Este script resuelve un problema específico: **los archivos de Google Workspace no se pueden descargar directamente** con la aplicación de escritorio de Drive (se descargan como accesos directos de 1KB).
+Takeout te da varios zips de 2 GB, **no incluye lo de "Compartido conmigo"** que no esté en tu unidad y pierde las fechas de los archivos. Este programa baja directamente a una carpeta normal, igual que la ves en Drive.
 
-### Funcionalidades principales:
-
-✅ **Exporta solo archivos de Google**:
-- Google Docs → `.docx`
-- Google Sheets → `.xlsx`
-- Google Slides → `.pptx`
-
-✅ **Ignora archivos normales** (PDFs, imágenes, ZIPs, etc.)
-
-✅ **Opcional:** manda los originales a la papelera de Drive después de exportar (`DELETE_ORIGINAL = True`). Se pueden recuperar durante 30 días
-
-✅ **Sistema de reanudación**: Si se interrumpe, continúa donde se quedó
-
-✅ **Solo crea carpetas con contenido**: Evita carpetas vacías
-
-✅ **Reintentos automáticos**: Maneja timeouts y errores de red
-
----
-
-## 📁 Estructura del proyecto
+## Cómo queda
 
 ```
-drive-exporter/
-│
-├── export_google_files.py    # Script principal
-├── credentials.json           # Credenciales OAuth de Google Cloud
-├── token.json                 # Token generado tras autenticar (auto-creado)
-│
-├── progress.json              # Registro de archivos procesados (auto-creado)
-├── export_log.txt             # Log detallado de operaciones (auto-creado)
-│
-└── exports/                   # Carpeta de salida (auto-creada)
-    └── Mi Drive/
-        ├── Subcarpeta1/
-        ├── Subcarpeta2/
-        └── ...
+exports/
+├── Mi unidad/
+│   ├── Universidad/
+│   │   ├── Informe final.docx
+│   │   ├── Presupuesto.xlsx
+│   │   └── foto.jpg
+│   └── Carpeta compartida (acceso directo)/
+├── Mi unidad (sin carpeta)/        ← archivos tuyos que se quedaron sin carpeta
+├── Compartido conmigo/
+├── Unidades compartidas/
+│   └── Equipo/
+├── _informe.html                   ← índice para buscar y ordenar
+├── _indice.csv
+└── .drive-exporter/                ← estado para reanudar y registro
 ```
 
----
+Con `--orden fecha` se organiza por fecha de modificación: `Mi unidad/2024/2024-03/…`.
 
-## 🔧 Requisitos previos
+## Instalación
 
-### 1. Python 3.7+
-Verifica tu versión:
-```bash
-python --version
-```
-
-### 2. Dependencias
-Instala las librerías necesarias:
-```bash
-pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
-```
-
-O con conda:
-```bash
-conda install -c conda-forge google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
-```
-
-### 3. Credenciales de Google Cloud
-
-#### Paso 1: Crear proyecto en Google Cloud
-1. Ve a [Google Cloud Console](https://console.cloud.google.com/)
-2. Crea un nuevo proyecto
-3. Habilita la **Google Drive API**
-
-#### Paso 2: Configurar OAuth
-1. Ve a **APIs & Services → OAuth consent screen**
-2. Selecciona **External** y completa los campos obligatorios
-3. Ve a **Credentials → Create Credentials → OAuth Client ID**
-4. Selecciona **Desktop app**
-5. Descarga el archivo JSON
-
-#### Paso 3: Colocar credenciales
-1. Renombra el archivo descargado a `credentials.json`
-2. Colócalo en la carpeta del proyecto
-
----
-
-## 🚀 Configuración
-
-Abre `export_google_files.py` y configura estas variables:
-
-```python
-# ID de la carpeta de Drive a exportar
-ROOT_FOLDER_ID = "PEGA_AQUI_EL_ID_DE_TU_CARPETA"
-
-# Nombre de la carpeta (para crear subcarpeta local)
-ROOT_FOLDER_NAME = "Mi Drive"
-
-# Mandar los originales a la papelera tras exportar (desactivado por defecto)
-DELETE_ORIGINAL = False
-
-# Carpeta de salida
-OUTPUT_FOLDER = "exports"
-```
-
-### ¿Cómo obtener el ROOT_FOLDER_ID?
-
-1. Abre la carpeta en Google Drive (navegador web)
-2. Copia el ID de la URL:
-   ```
-   https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345
-                                          └─────────────────┬──────────────────┘
-                                                       Copia este ID
-   ```
-
----
-
-## ▶️ Uso
-
-### 1. Primera ejecución
+Necesitas Python 3.9 o superior.
 
 ```bash
-cd "C:\Users\tu_usuario\ruta\drive-exporter"
-python export_google_files.py
+pip install -r requirements.txt
 ```
 
-- Se abrirá tu navegador para autorizar el acceso
-- Acepta los permisos
-- El script comenzará a exportar
+### Credenciales de Google (una sola vez)
 
-### 2. Ejecuciones posteriores
+Google exige que cada programa que usa tu Drive tenga unas credenciales propias. Son gratis:
 
-El script usará el token guardado (`token.json`), no pedirá autorización de nuevo.
+1. Entra en [Google Cloud Console](https://console.cloud.google.com/) y crea un proyecto.
+2. Activa la **Google Drive API** (menú *APIs y servicios → Biblioteca*).
+3. Ve a **Google Auth Platform** (antes "Pantalla de consentimiento de OAuth"), elige **Externo** y rellena los campos obligatorios.
+4. En **Público** (*Audience*) → **Usuarios de prueba**, **añade tu propio correo de Gmail**. Si no lo haces, al dar permiso verás *"Acceso bloqueado: … no ha completado el proceso de verificación de Google"*.
+5. En **Clientes** (*Credentials*) → **Crear cliente** → tipo **Aplicación de escritorio**. Descarga el JSON.
+6. Renómbralo a `credentials.json` y ponlo en la carpeta del programa.
 
-### 3. Continuar una exportación interrumpida
+La primera vez que ejecutes el programa se abrirá el navegador para que des permiso. El permiso se guarda en `token_lectura.json`, así que no te lo volverá a pedir.
 
-Si el script se interrumpe (corte de internet, apagar PC, etc.):
+> En modo "prueba", Google caduca el permiso cada 7 días. Si pasa, el programa vuelve a abrir el navegador; no hay que hacer nada más.
+
+## Uso
+
+**Fácil (Windows):** doble clic en `exportar.bat`. Un asistente te pregunta qué exportar y dónde.
+
+**Desde la terminal:**
 
 ```bash
-python export_google_files.py
+python -m drive_exporter                         # asistente con preguntas
+python -m drive_exporter --si                    # todo, a la carpeta exports/
+python -m drive_exporter --simular               # ver qué haría, sin descargar nada
+python -m drive_exporter -o "D:\Copia Drive"     # en otra carpeta
+python -m drive_exporter --origen compartido     # solo "Compartido conmigo"
+python -m drive_exporter --carpeta https://drive.google.com/drive/folders/1AbC...
+python -m drive_exporter --doc docx,pdf --sheet xlsx,pdf   # cada documento en dos formatos
+python -m drive_exporter --orden fecha           # carpetas por año y mes
+python -m drive_exporter --solo-google           # solo Docs/Hojas/Presentaciones (como la v1)
 ```
 
-Continuará **automáticamente desde donde se quedó** gracias a `progress.json`.
+| Opción | Qué hace |
+|---|---|
+| `-o`, `--salida` | Carpeta de destino (por defecto `exports`) |
+| `--origen` | `mi-unidad`, `compartido` o `unidades`. Se puede repetir. Por defecto, todo |
+| `--carpeta` | Solo una carpeta (ID o enlace) |
+| `--doc`, `--sheet`, `--slides`, `--drawing` | Formatos de exportación, separados por comas |
+| `--solo-google` | No bajar PDFs, fotos, etc.; solo convertir los archivos de Google |
+| `--orden` | `carpetas` (como en Drive) o `fecha` (`AAAA/AAAA-MM`) |
+| `--accesos-directos` | `seguir` (por defecto) o `ignorar` |
+| `--hilos` | Descargas en paralelo (por defecto 4) |
+| `--simular` | No descarga; genera el índice con lo que haría |
+| `--sin-navegador` | Muestra el enlace de permiso en vez de abrir el navegador |
+| `--mandar-a-papelera` | ⚠️ Tras exportarlos, manda a la papelera de Drive tus Docs/Hojas/Presentaciones. Pide confirmación y permiso de escritura |
+| `-s`, `--si` | No preguntar antes de empezar |
 
----
+### Formatos disponibles
 
-## 📊 Ejemplo de salida
+| Tipo de Google | Por defecto | Otros |
+|---|---|---|
+| Documentos | `docx` | `pdf`, `odt`, `rtf`, `txt`, `md`, `epub`, `html.zip` |
+| Hojas de cálculo | `xlsx` | `pdf`, `ods`, `csv`*, `tsv`*, `html.zip` |
+| Presentaciones | `pptx` | `pdf`, `odp`, `txt`, `png`*, `jpg`*, `svg`* |
+| Dibujos | `png` | `jpg`, `svg`, `pdf` |
+| Apps Script | `json` | |
 
-```
-============================================================
-🚀 Iniciando exportación de Google Drive
-============================================================
-🔐 Autenticando...
-✅ Autenticación exitosa
-📊 Archivos ya procesados: 1247
-🔍 Buscando archivos en carpeta raíz...
-📦 Archivos encontrados: 2502
+\* Solo la primera hoja o diapositiva (limitación de Google).
 
-[1/2502] Procesando...
-📂 Explorando carpeta: Universidad
-→ Exporting: codigo
-✓ Exported: exports\Mi Drive\Universidad\...\codigo.docx
-✓ Original movido a la papelera: codigo
+## Lo que no se puede bajar
 
-[2/2502] Procesando...
-✗ Unsupported: foto.jpg (image/jpeg)
+Queda anotado en el índice con su enlace, para que lo revises a mano:
 
-[3/2502] Procesando...
-→ Exporting: Informe final
-✓ Exported: exports\Mi Drive\...\Informe final.docx
-✓ Original movido a la papelera: Informe final
+- **Formularios de Google**: la API no los exporta. Las respuestas suelen estar en una Hoja vinculada, que sí se baja.
+- **Google Sites y My Maps**.
+- **Archivos con la descarga desactivada** por su propietario.
+- **Documentos enormes**: si un Doc pasa del límite de exportación de la API (10 MB), el programa lo intenta por otra vía que admite archivos más grandes. Si aun así falla, aparece como error.
 
-...
+## Preguntas frecuentes
 
-============================================================
-🎉 Exportación completada
-📁 Archivos en: C:\Users\...\drive-exporter\exports\Mi Drive
-📊 Total procesados: 2502
-============================================================
-```
+**¿Se ha cortado a medias?** Vuelve a ejecutar lo mismo. Lo ya bajado aparece como *sin cambios* y sigue con el resto.
 
----
+**¿Quiero tener la copia al día?** Ejecuta lo mismo cada cierto tiempo. Solo se baja lo nuevo o lo modificado. Lo que borres en Drive **no** se borra de tu copia.
 
-## 🔄 Sistema de reanudación
+**¿Lo compartido conmigo que también tengo en Mi unidad se baja dos veces?** No. Se baja una vez (en Mi unidad) y en *Compartido conmigo* queda anotado como repetido, con la ruta donde está.
 
-El archivo `progress.json` guarda el ID de cada archivo procesado:
+**¿Qué hago con el `progress.json` de la versión 1?** Nada, ya no se usa. La v2 guarda su estado en `exports/.drive-exporter/estado.sqlite`.
 
-```json
-[
-  "1H_mTd1vCoN2IAOkdOj2fzMk8FHYHodjUi9S5B9GZnk8",
-  "1X9FOchlS2j_6R7ice4V757Cc9BlKVMZjpsdWGy0rr7k",
-  ...
-]
-```
+## Desarrollo
 
-### Beneficios:
-
-✅ **Nunca procesa dos veces el mismo archivo**  
-✅ **Continúa tras interrupciones** (apagar PC, cortes de internet)  
-✅ **Permite pausar y reanudar días después**  
-✅ **Re-ejecutar no repite trabajo**
-
----
-
-## ⚙️ Configuración avanzada
-
-### Ajustar reintentos
-
-Si experimentas muchos timeouts, aumenta:
-
-```python
-MAX_RETRIES = 5      # Intentos por archivo (default: 3)
-RETRY_DELAY = 10     # Segundos entre reintentos (default: 5)
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
 ```
 
-### Cambiar carpeta de salida
+Las pruebas usan un Drive falso en memoria (`tests/fake_drive.py`) que imita a la API: carpetas, archivos con el mismo nombre, accesos directos (incluido uno roto), compartidos, unidades compartidas, archivos huérfanos, exportaciones que superan el límite y descargas corruptas.
 
-```python
-OUTPUT_FOLDER = "mis_exportaciones"
+```
+drive_exporter/
+├── cli.py         línea de comandos y asistente
+├── api.py         todo lo que habla con Google (permisos, listados, descargas, reintentos)
+├── planner.py     reconstruye el árbol y decide qué va dónde y con qué nombre
+├── exporter.py    descarga en paralelo, verifica MD5, pone fechas y reanuda
+├── state.py       estado en SQLite para reanudar y actualizar
+├── report.py      índice CSV e informe HTML
+├── names.py       nombres válidos en Windows y sin choques
+├── timestamps.py  fechas de modificación y creación
+└── formats.py     tipos de Google y formatos de exportación
 ```
 
-### Mandar los originales a la papelera
+## Historial
 
-```python
-DELETE_ORIGINAL = True
-```
+- **v2.0 (noviembre 2026)**: reescrito entero. Exporta Mi unidad, Compartido conmigo y unidades compartidas; baja también los archivos normales; conserva las fechas; sigue accesos directos; actualización incremental; verificación MD5; índice HTML/CSV; permiso de solo lectura; descargas en paralelo; asistente y `exportar.bat`. Arregla que la v1 solo veía los 100 primeros elementos de cada carpeta.
+- **v1 (diciembre 2024)**: script que exportaba los Docs, Hojas y Presentaciones de una carpeta.
 
-⚠️ Los originales van a la **papelera** de Drive (no se borran para siempre). Desde allí se recuperan durante 30 días.
+## Licencia
 
----
-
-## 🛑 Limitaciones conocidas
-
-1. **Archivos muy grandes** (>50MB en Google Docs):
-   - Google Drive tiene límite de exportación
-   - Se registra en el log como `exportSizeLimitExceeded`
-
-2. **Solo archivos de Google Workspace**:
-   - No descarga PDFs, imágenes, ZIPs, etc.
-   - Esto es **intencional** para evitar duplicados
-
-3. **Límite de API**:
-   - Google limita a ~1000 peticiones/100 segundos
-   - El script maneja esto con reintentos
-
----
-
-## 📝 Archivos generados
-
-### `progress.json`
-Registro de IDs procesados. **No borrar** si quieres continuar una exportación.
-
-### `export_log.txt`
-Log completo de operaciones:
-```
-→ Exporting: documento.docx
-✓ Exported: exports\...\documento.docx
-✓ Original movido a la papelera: documento
-✗ Unsupported: imagen.png (image/png)
-❌ Error exportando 'archivo_grande': exportSizeLimitExceeded
-```
-
-### `token.json`
-Token de autenticación. Se regenera automáticamente si caduca.
-
----
-
-## 🐛 Solución de problemas
-
-### Error: `credentials.json not found`
-**Solución**: Descarga el archivo desde Google Cloud Console y colócalo en la carpeta del proyecto.
-
-### Error: `TimeoutError: The read operation timed out`
-**Solución**: El script reintenta automáticamente. Si persiste, aumenta `MAX_RETRIES` y `RETRY_DELAY`.
-
-### Error: `exportSizeLimitExceeded`
-**Solución**: El archivo es demasiado grande para exportar. Edítalo manualmente en Drive para reducir su tamaño.
-
-### Carpetas vacías creadas
-**Solución**: ✅ Ya solucionado en esta versión. Las carpetas solo se crean si contienen archivos exportables.
-
-### El script se detiene inesperadamente
-**Solución**: Ejecuta de nuevo. Continuará desde donde se quedó gracias a `progress.json`.
-
----
-
-## 🔒 Seguridad
-
-- **Las credenciales son privadas**: No compartas `credentials.json` ni `token.json`
-- **Permisos OAuth**: Solo requiere acceso a Google Drive
-- **Datos locales**: Todo se guarda en tu PC, no se envía a terceros
-
----
-
-## 📞 Soporte
-
-Si encuentras problemas:
-
-1. Revisa `export_log.txt` para ver errores específicos
-2. Verifica que `credentials.json` esté configurado correctamente
-3. Asegúrate de tener conexión a internet estable
-4. Comprueba que la carpeta de Drive exista y tengas permisos
-
----
-
-## 📜 Licencia
-
-Este proyecto es de código abierto. Úsalo libremente.
-
----
-
-## 🎉 Estado del proyecto
-
-**✅ FUNCIONANDO** - Script probado y operativo
-
-**Última actualización**: Diciembre 2024
-
----
-
-## 🙏 Créditos
-
-Script creado para resolver el problema de exportación masiva de archivos de Google Workspace.
-
-**Autor**: [joan-bl](https://github.com/joan-bl)
+MIT. Autor: [joan-bl](https://github.com/joan-bl)
