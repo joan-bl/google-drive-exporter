@@ -157,7 +157,10 @@ def wizard(args):
     out = input(f"¿Dónde lo guardo? [{args.salida}]: ").strip().strip('"')
     if out:
         args.salida = out
-    order = input("¿Ordenar como en Drive (1) o por fecha AAAA/AAAA-MM (2)? [1]: ").strip()
+    print("¿Cómo lo ordeno en tu ordenador?")
+    print("  1) Con las mismas carpetas que en Drive  [recomendado]")
+    print("  2) Por fecha: todo junto en carpetas AAAA/AAAA-MM, sin las carpetas de Drive")
+    order = input("Elige [1]: ").strip()
     if order == "2":
         args.orden = "fecha"
     sim = input("¿Hacer primero una simulación sin descargar nada? (s/N): ").strip().lower()
@@ -271,21 +274,28 @@ def main(argv=None):
             log("Cancelado.")
             return 1
 
-    exporter = Exporter(client, out_dir, log=log, threads=args.hilos)
-    results = exporter.run(entries, dry_run=args.simular)
-    title = f"Exportación de Drive · {who.get('emailAddress', '')} · {datetime.now():%d/%m/%Y %H:%M}"
-    csv_path, html_path = write_reports(out_dir, entries, results, summary, title)
+    def export(dry):
+        results = Exporter(client, out_dir, log=log, threads=args.hilos).run(entries, dry_run=dry)
+        title = f"Exportación de Drive · {who.get('emailAddress', '')} · {datetime.now():%d/%m/%Y %H:%M}"
+        _, html_path = write_reports(out_dir, entries, results, summary, title)
+        counts = {}
+        for st, _ in results.values():
+            counts[st] = counts.get(st, 0) + 1
+        log("\n🎉 Terminado" if not dry else "\n🧪 Simulación terminada: NO se ha descargado nada")
+        log("   " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
+        log(f"📁 Carpeta: {out_dir}")
+        log(f"📑 Índice: {html_path}")
+        errors = counts.get("error", 0)
+        if errors:
+            log(f"⚠️  {errors} con error: vuelve a ejecutar para reintentarlos, o mira el informe.")
+        return results, errors
 
-    counts = {}
-    for st, _ in results.values():
-        counts[st] = counts.get(st, 0) + 1
-    log("\n🎉 Terminado" if not args.simular else "\n🧪 Simulación terminada (no se ha descargado nada)")
-    log("   " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
-    log(f"📁 Carpeta: {out_dir}")
-    log(f"📑 Índice: {html_path}")
-    errors = counts.get("error", 0)
-    if errors:
-        log(f"⚠️  {errors} con error: vuelve a ejecutar para reintentarlos, o mira el informe.")
+    results, errors = export(args.simular)
+    if args.simular and interactive and entries:
+        ans = input("\n⬇️  ¿Lo descargo ahora de verdad, con estas mismas opciones? (s/N): ").strip().lower()
+        if ans.startswith("s"):
+            args.simular = False
+            results, errors = export(False)
     code = 0 if not errors else 3
 
     # ---------- limpiar Drive: mandar a la papelera lo que ya está en el ordenador ----------

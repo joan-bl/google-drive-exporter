@@ -336,3 +336,26 @@ def test_exclude_follows_shortcuts_inside():
     assert not any(e.file_id in ("S", "s1") and e.kind != "skip" for e in entries)
     notes = [e.note for e in entries if e.file_id == "S"]
     assert notes and "excluiste" in notes[0]
+
+
+def test_wizard_simulation_then_real_download(tmp_path, monkeypatch):
+    import json
+    import drive_exporter.api as api
+    from drive_exporter import cli
+    d = scenario()
+    monkeypatch.setattr(api, "authenticate", lambda *a, **k: object())
+    monkeypatch.setattr(api, "DriveClient", lambda creds, log=None: d)
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(tmp_path / "cfg.json"))
+    creds = tmp_path / "credentials.json"
+    creds.write_text(json.dumps({"installed": {"client_id": "x"}}))
+    cli._save_config({"credenciales": str(creds)})
+    out = tmp_path / "salida"
+    # asistente: todo, carpeta, como en Drive, simulación sí, excluir ninguna,
+    # descargar de verdad sí, papelera no
+    answers = iter(["1", str(out), "1", "s", "0", "s", "n"])
+    monkeypatch.setattr("builtins.input", lambda *_: next(answers))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.argv", ["drive_exporter"])
+    assert cli.main() == 0
+    assert (out / "Mi unidad" / "Universidad" / "foto.jpg").exists()
+    assert d.trashed == []
