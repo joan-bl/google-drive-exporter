@@ -10,7 +10,8 @@ Copia **todo tu Google Drive al ordenador**, ordenado y con sus fechas, sin el l
 - **Reanudable e incremental**: si se corta, sigue donde estaba. Si lo vuelves a ejecutar meses después, solo baja lo nuevo o lo cambiado, y si renombraste algo en Drive lo renombra también en tu disco.
 - **Comprobado**: verifica la suma MD5 de cada archivo descargado.
 - **Índice con todo**: un `_informe.html` que se puede buscar y ordenar por fecha, y un `_indice.csv` para Excel. Incluye lo que no se pudo bajar y por qué (formularios, archivos con la descarga desactivada…).
-- **Solo lectura**: pide a Google permiso **solo para leer**. No toca nada de tu Drive (salvo que actives a propósito `--mandar-a-papelera`).
+- **Solo lectura**: para exportar pide a Google permiso **solo para leer**.
+- **Dejar Drive limpio (opcional)**: al terminar te pregunta si quieres mandar a la papelera de Drive lo que ya tienes descargado, para no tener dos copias que acaben siendo distintas. Solo lo **tuyo** y descargado **sin errores**; una carpeta solo si todo lo de dentro se ha descargado; antes de cada archivo comprueba que no ha cambiado en Drive. Se recupera durante 30 días.
 
 ## ¿Por qué no Google Takeout?
 
@@ -56,7 +57,9 @@ Google exige que cada programa que usa tu Drive tenga unas credenciales propias.
 5. En **Clientes** (*Credentials*) → **Crear cliente** → tipo **Aplicación de escritorio**. Descarga el JSON.
 6. Renómbralo a `credentials.json` y ponlo en la carpeta del programa.
 
-La primera vez que ejecutes el programa se abrirá el navegador para que des permiso. El permiso se guarda en `token_lectura.json`, así que no te lo volverá a pedir.
+Si `credentials.json` no está en la carpeta del programa, el asistente te pide que **arrastres el archivo a la ventana** y recuerda dónde está (así puedes guardarlo en una carpeta privada).
+
+La primera vez se abrirá el navegador para que des permiso. Se guarda en `token_lectura.json`, junto a `credentials.json`. Si algún día usas la limpieza de Drive, ese permiso de escritura va aparte, en `token_escritura.json`.
 
 > En modo "prueba", Google caduca el permiso cada 7 días. Si pasa, el programa vuelve a abrir el navegador; no hay que hacer nada más.
 
@@ -90,7 +93,7 @@ python -m drive_exporter --solo-google           # solo Docs/Hojas/Presentacione
 | `--hilos` | Descargas en paralelo (por defecto 4) |
 | `--simular` | No descarga; genera el índice con lo que haría |
 | `--sin-navegador` | Muestra el enlace de permiso en vez de abrir el navegador |
-| `--mandar-a-papelera` | ⚠️ Tras exportarlos, manda a la papelera de Drive tus Docs/Hojas/Presentaciones. Pide confirmación y permiso de escritura |
+| `--mandar-a-papelera` | Tras exportar, manda a la papelera de Drive lo tuyo descargado sin errores (con `--simular`, solo enseña qué mandaría). Pide escribir SI (o `--si`) y, la primera vez, permiso de escritura |
 | `-s`, `--si` | No preguntar antes de empezar |
 
 ### Formatos disponibles
@@ -120,6 +123,8 @@ Queda anotado en el índice con su enlace, para que lo revises a mano:
 
 **¿Quiero tener la copia al día?** Ejecuta lo mismo cada cierto tiempo. Solo se baja lo nuevo o lo modificado. Lo que borres en Drive **no** se borra de tu copia.
 
+**¿Y lo compartido conmigo?** No se puede mandar a la papelera porque no es tuyo: se descarga, pero en Drive se queda donde está.
+
 **¿Lo compartido conmigo que también tengo en Mi unidad se baja dos veces?** No. Se baja una vez (en Mi unidad) y en *Compartido conmigo* queda anotado como repetido, con la ruta donde está.
 
 **¿Qué hago con el `progress.json` de la versión 1?** Nada, ya no se usa. La v2 guarda su estado en `exports/.drive-exporter/estado.sqlite`.
@@ -139,6 +144,7 @@ drive_exporter/
 ├── api.py         todo lo que habla con Google (permisos, listados, descargas, reintentos)
 ├── planner.py     reconstruye el árbol y decide qué va dónde y con qué nombre
 ├── exporter.py    descarga en paralelo, verifica MD5, pone fechas y reanuda
+├── cleanup.py     qué se puede mandar a la papelera de Drive al terminar, y hacerlo con comprobaciones
 ├── state.py       estado en SQLite para reanudar y actualizar
 ├── report.py      índice CSV e informe HTML
 ├── names.py       nombres válidos en Windows y sin choques
@@ -148,6 +154,7 @@ drive_exporter/
 
 ## Historial
 
+- **v2.1 (noviembre 2026)**: opción de dejar Drive limpio al terminar (papelera solo de lo tuyo y bien descargado); el asistente pide `credentials.json` al principio y lo recuerda.
 - **v2.0 (noviembre 2026)**: reescrito entero. Exporta Mi unidad, Compartido conmigo y unidades compartidas; baja también los archivos normales; conserva las fechas; sigue accesos directos; actualización incremental; verificación MD5; índice HTML/CSV; permiso de solo lectura; descargas en paralelo; asistente y `exportar.bat`. Arregla que la v1 solo veía los 100 primeros elementos de cada carpeta.
 - **v1 (diciembre 2024)**: script que exportaba los Docs, Hojas y Presentaciones de una carpeta.
 

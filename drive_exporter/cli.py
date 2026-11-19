@@ -129,8 +129,9 @@ def build_parser():
     p.add_argument("--sin-navegador", action="store_true",
                    help="no abrir el navegador al dar permiso: muestra el enlace para copiarlo")
     p.add_argument("--mandar-a-papelera", action="store_true",
-                   help="PELIGROSO: tras exportar, manda a la papelera de Drive los Docs/Hojas/"
-                        "Presentaciones tuyos exportados sin error (recuperables 30 días)")
+                   help="tras exportar, manda a la papelera de Drive lo TUYO que se ha descargado sin "
+                        "errores (archivos y carpetas que quedan vacías). Lo de otras personas no se toca. "
+                        "Se recupera durante 30 días. Pide escribir SI (o --si)")
     p.add_argument("-s", "--si", action="store_true", help="no preguntar antes de empezar")
     return p
 
@@ -167,32 +168,33 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
     args = parser.parse_args(argv)
-    if not argv and sys.stdin.isatty():
-        args = wizard(args)
+    tty = sys.stdin.isatty()
+    interactive = not argv and tty
 
     try:
         fmt = formats.parse_format_args({k: getattr(args, k) for k in ("doc", "sheet", "slides", "drawing")})
     except ValueError as err:
         parser.error(str(err))
 
+    # Primero las credenciales: si faltan, no tiene sentido contestar el resto de preguntas
+    creds_file = find_credentials(args.credenciales, interactive=tty)
+    if not os.path.exists(creds_file):
+        print(f"❌ No encuentro '{creds_file}'. Mira en el README cómo crear las credenciales de Google.")
+        return 2
+    creds_dir = os.path.dirname(os.path.abspath(creds_file))
+
+    if interactive:
+        args = wizard(args)
+
     out_dir = os.path.abspath(args.salida)
     log = Logger()
     log.open(os.path.join(out_dir, ".drive-exporter", "registro.log"))
 
     from .api import SCOPE_FULL, SCOPE_READONLY, DriveClient, authenticate
-    creds_file = find_credentials(args.credenciales, interactive=sys.stdin.isatty())
-    creds_dir = os.path.dirname(os.path.abspath(creds_file))
-    if args.mandar_a_papelera:
-        scopes, token = [SCOPE_FULL], os.path.join(creds_dir, "token_escritura.json")
-    else:
-        scopes, token = [SCOPE_READONLY], os.path.join(creds_dir, "token_lectura.json")
 
-    log("🔐 Conectando con Google Drive" + (" (solo lectura)" if not args.mandar_a_papelera else " (con permiso de escritura)"))
-    try:
-        creds = authenticate(creds_file, token, scopes, open_browser=not args.sin_navegador)
-    except FileNotFoundError as err:
-        log(f"❌ {err}")
-        return 2
+    log("🔐 Conectando con Google Drive (solo lectura)")
+    creds = authenticate(creds_file, os.path.join(creds_dir, "token_lectura.json"), [SCOPE_READONLY],
+                         open_browser=not args.sin_navegador)
     client = DriveClient(creds, log=log)
     who = client.about().get("user", {})
     log(f"✅ Cuenta: {who.get('displayName', '')} <{who.get('emailAddress', '')}>")
@@ -218,22 +220,16 @@ def main(argv=None):
     if not entries:
         log("  (nada que exportar)")
 
+    from .cleanup import plan_trash, run_trash
     from .exporter import Exporter
     from .report import write_reports
 
-    if args.mandar_a_papelera and not args.simular:
-        log("\n⚠️  Has pedido mandar a la papelera de Drive los originales exportados.")
-        if input("Escribe SI para confirmarlo: ").strip() != "SI":
-            log("Cancelado.")
-            return 1
-
-    if not args.simular and not args.si and sys.stdin.isatty():
+    if not args.simular and not args.si and tty:
         if input(f"\n¿Empezar a descargar en {out_dir}? (S/n): ").strip().lower().startswith("n"):
             log("Cancelado.")
             return 1
 
-    exporter = Exporter(client, out_dir, log=log, threads=args.hilos,
-                        trash_originals=args.mandar_a_papelera and not args.simular)
+    exporter = Exporter(client, out_dir, log=log, threads=args.hilos)
     results = exporter.run(entries, dry_run=args.simular)
     title = f"Exportación de Drive · {who.get('emailAddress', '')} · {datetime.now():%d/%m/%Y %H:%M}"
     csv_path, html_path = write_reports(out_dir, entries, results, summary, title)
@@ -248,4 +244,39 @@ def main(argv=None):
     errors = counts.get("error", 0)
     if errors:
         log(f"⚠️  {errors} con error: vuelve a ejecutar para reintentarlos, o mira el informe.")
-    return 0 if not errors else 3
+    code = 0 if not errors else 3
+
+    # ---------- limpiar Drive: mandar a la papelera lo que ya está en el ordenador ----------
+    want_trash = args.mandar_a_papelera
+    if not want_trash and interactive and not args.simular and entries:
+        ans = input("\n🧹 ¿Quieres mandar a la papelera de Drive lo tuyo que ya tienes descargado? "
+                    "Así no tendrás dos copias. (s/N): ").strip().lower()
+        want_trash = ans.startswith("s")
+    if not want_trash:
+        return code
+
+    tplan = plan_trash(entries, results, assume_ok=args.simular)
+    log(f"\n🧹 {'Si fuera de verdad, irían' if args.simular else 'Irán'} a la papelera de Drive: "
+        f"{len(tplan.files)} archivos ({human_size(tplan.size)}) y {len(tplan.folders)} carpetas.")
+    for reason, n in sorted(tplan.kept.items(), key=lambda x: -x[1]):
+        log(f"   Se quedan {n} porque {reason}.")
+    log("   Todo se puede recuperar desde la papelera de Drive durante 30 días.")
+    if args.simular or not (tplan.files or tplan.folders):
+        return code
+    if not args.si:
+        if not tty:
+            log("   Para hacerlo sin preguntar, añade --si.")
+            return 1
+        if input("   Escribe SI para mandarlos a la papelera: ").strip() != "SI":
+            log("   No se ha tocado nada en Drive.")
+            return code
+    log("🔐 Para esto hace falta permiso de escritura (la primera vez se abrirá el navegador).")
+    wcreds = authenticate(creds_file, os.path.join(creds_dir, "token_escritura.json"), [SCOPE_FULL],
+                          open_browser=not args.sin_navegador)
+    writer = DriveClient(wcreds, log=log)
+    if writer.about().get("user", {}).get("emailAddress") != who.get("emailAddress"):
+        log("❌ El permiso de escritura es de otra cuenta. Borra token_escritura.json y vuelve a intentarlo.")
+        return 4
+    sent, skipped = run_trash(writer, tplan, log=log)
+    log(f"\n🧹 Mandados a la papelera: {sent}. Se han quedado: {skipped}.")
+    return code

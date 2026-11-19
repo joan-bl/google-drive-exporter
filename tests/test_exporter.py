@@ -164,11 +164,61 @@ def test_big_export_uses_export_link(tmp_path):
     assert st["Mi unidad/Universidad/Informe (2).docx"] == "descargado"
 
 
-def test_trash_only_my_exported_google_files(tmp_path):
+def _export(d, tmp_path):
+    entries = plan(d)
+    results = Exporter(d, str(tmp_path), log=quiet).run(entries)
+    return entries, results
+
+
+def test_trash_plan_only_mine_and_complete_folders(tmp_path):
+    from drive_exporter.cleanup import plan_trash
+    d = scenario()
+    entries, results = _export(d, tmp_path)
+    tp = plan_trash(entries, results)
+    files = {f[0] for f in tp.files}
+    folders = {f[0] for f in tp.folders}
+    # mío y bien descargado
+    assert {"doc1", "bin1", "img1", "img2", "sh1", "O"} <= files
+    # de otras personas, de una unidad compartida o sin descargar: se quedan
+    assert not files & {"s1", "T", "d1", "nodl", "form1"}
+    # "Tema" solo tiene la hoja (descargada): va entera. "Universidad" tiene un formulario
+    # y un PDF protegido que no se han podido bajar: se queda.
+    assert "B" in folders and "A" not in folders
+    assert "S" not in folders  # carpeta de otra persona
+    assert tp.kept["es de otra persona"] >= 2
+    assert tp.kept["está en una unidad compartida"] == 1
+
+
+def test_trash_plan_skips_failed_downloads(tmp_path):
+    from drive_exporter.cleanup import plan_trash
+    d = scenario()
+    d.export_limit.add("sh1")  # falla la exportación (sin enlace alternativo)
+    entries, results = _export(d, tmp_path)
+    tp = plan_trash(entries, results)
+    assert "sh1" not in {f[0] for f in tp.files}
+    assert "B" not in {f[0] for f in tp.folders}, "la carpeta no puede irse si algo de dentro falló"
+
+
+def test_run_trash_rechecks_changes(tmp_path):
+    from drive_exporter.cleanup import plan_trash, run_trash
+    d = scenario()
+    entries, results = _export(d, tmp_path)
+    tp = plan_trash(entries, results)
+    d.touch("sh1", "2030-01-01T00:00:00.000Z")   # alguien lo edita después de descargarlo
+    sent, skipped = run_trash(d, tp, log=quiet)
+    assert "sh1" not in d.trashed and "B" not in d.trashed
+    assert "doc1" in d.trashed and "O" in d.trashed
+    assert skipped == 1
+    assert not set(d.trashed) & {"s1", "T", "d1", "S", "A"}
+
+
+def test_dry_run_trash_preview_touches_nothing(tmp_path):
+    from drive_exporter.cleanup import plan_trash
     d = scenario()
     entries = plan(d)
-    Exporter(d, str(tmp_path), log=quiet, trash_originals=True).run(entries)
-    assert sorted(d.trashed) == ["doc1", "sh1"]
+    results = Exporter(d, str(tmp_path), log=quiet).run(entries, dry_run=True)
+    tp = plan_trash(entries, results, assume_ok=True)
+    assert tp.files and d.trashed == []
 
 
 def test_dry_run_downloads_nothing_and_reports(tmp_path):
@@ -190,16 +240,33 @@ def test_single_folder(tmp_path):
 
 
 def test_cli_end_to_end(tmp_path, monkeypatch):
+    import json
     import drive_exporter.api as api
     from drive_exporter import cli
     d = scenario()
     monkeypatch.setattr(api, "authenticate", lambda *a, **k: object())
     monkeypatch.setattr(api, "DriveClient", lambda creds, log=None: d)
+    creds = tmp_path / "credentials.json"
+    creds.write_text(json.dumps({"installed": {"client_id": "x"}}))
     out = tmp_path / "salida"
-    code = cli.main(["-o", str(out), "--si", "--doc", "docx,pdf", "--hilos", "3"])
+    base = ["--credenciales", str(creds)]
+    code = cli.main(base + ["-o", str(out), "--si", "--doc", "docx,pdf", "--hilos", "3"])
     assert code == 0
     assert (out / "Mi unidad" / "Universidad" / "Informe.pdf").exists()
     assert (out / "_informe.html").exists() and (out / "_indice.csv").exists()
     assert (out / ".drive-exporter" / "registro.log").exists()
-    code = cli.main(["-o", str(out / "sim"), "--simular", "--origen", "compartido"])
-    assert code == 0 and not (out / "sim" / "Compartido conmigo").exists()
+    assert d.trashed == [], "sin --mandar-a-papelera no se toca Drive"
+    code = cli.main(base + ["-o", str(out / "sim"), "--simular", "--origen", "compartido", "--mandar-a-papelera"])
+    assert code == 0 and not (out / "sim" / "Compartido conmigo").exists() and d.trashed == []
+    # de verdad, con --si: solo lo mío y completo
+    code = cli.main(base + ["-o", str(out), "--si", "--mandar-a-papelera"])
+    assert code == 0
+    assert "doc1" in d.trashed and "B" in d.trashed and "T" not in d.trashed
+
+
+def test_cli_without_credentials_stops_early(tmp_path, monkeypatch):
+    from drive_exporter import cli
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(tmp_path / "cfg.json"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "HERE", str(tmp_path))
+    assert cli.main(["-o", str(tmp_path / "x"), "--si"]) == 2

@@ -96,6 +96,7 @@ class FakeDrive:
 
     def trash(self, fid):
         self.trashed.append(fid)
+        self.files[fid]["trashed"] = True
 
 
 def scenario():

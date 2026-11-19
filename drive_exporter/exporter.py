@@ -28,13 +28,11 @@ def _md5(path: str) -> str:
 
 
 class Exporter:
-    def __init__(self, client, out_dir: str, log=print, threads: int = 4,
-                 trash_originals: bool = False):
+    def __init__(self, client, out_dir: str, log=print, threads: int = 4):
         self.client = client
         self.out = os.path.abspath(out_dir)
         self.log = log
         self.threads = max(1, threads)
-        self.trash_originals = trash_originals
         self.state = State(os.path.join(self.out, ".drive-exporter", "estado.sqlite"))
         self.results = {}          # id(entry) -> (estado, nota)
         self._lock = threading.Lock()
@@ -85,8 +83,6 @@ class Exporter:
             apply_times(long_path(self.abs(e.local)), e.item.get("createdTime"),
                         e.item.get("modifiedTime"))
 
-        if self.trash_originals:
-            self._trash(tasks)
         self.state.close()
         return self.results
 
@@ -149,23 +145,6 @@ class Exporter:
             note = _friendly_error(err, reason)
             self.state.mark(e.key, e.file_id, e.local, modified, md5, e.size, "error", note)
             self._tick(e, STATUS_ERROR, note)
-
-    def _trash(self, tasks):
-        """Manda a la papelera los archivos de Google exportados sin errores (solo los tuyos)."""
-        by_id = {}
-        for e in tasks:
-            if e.kind == "export":
-                by_id.setdefault(e.file_id, []).append(e)
-        for fid, group in by_id.items():
-            if not group[0].item.get("ownedByMe"):
-                continue
-            if all(self.results.get(id(e), ("",))[0] in (STATUS_OK, STATUS_SAME, STATUS_MOVED)
-                   for e in group):
-                try:
-                    self.client.trash(fid)
-                    self.log(f"🗑️  A la papelera de Drive: {group[0].drive_path}")
-                except Exception as err:
-                    self.log(f"⚠️  No se pudo mandar a la papelera {group[0].drive_path}: {err}")
 
 
 def _friendly_error(err, reason: str) -> str:

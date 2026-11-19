@@ -15,7 +15,7 @@ SCOPE_FULL = "https://www.googleapis.com/auth/drive"
 FILE_FIELDS = (
     "id, name, mimeType, parents, createdTime, modifiedTime, size, md5Checksum, "
     "ownedByMe, owners(displayName, emailAddress), sharedWithMeTime, driveId, "
-    "shortcutDetails(targetId, targetMimeType), capabilities(canDownload), "
+    "shortcutDetails(targetId, targetMimeType), capabilities(canDownload, canTrash), "
     "webViewLink, exportLinks, trashed"
 )
 
