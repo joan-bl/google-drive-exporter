@@ -270,3 +270,69 @@ def test_cli_without_credentials_stops_early(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "HERE", str(tmp_path))
     assert cli.main(["-o", str(tmp_path / "x"), "--si"]) == 2
+
+
+def test_exclude_top_level_folder_by_name(tmp_path):
+    from drive_exporter.cleanup import plan_trash
+    d = scenario()
+    entries = plan(d, exclude=("UNIVERSIDAD",))          # sin distinguir mayúsculas
+    local = by_local(entries)
+    assert not any(k.startswith("Mi unidad/Universidad") for k in local)
+    skip = [e for e in entries if e.kind == "skip" and e.file_id == "A"]
+    assert skip and "Excluida" in skip[0].note
+    # lo de dentro no aparece en ninguna otra sección ni se manda a la papelera
+    assert not any(e.file_id in ("doc1", "img1", "sh1") for e in entries)
+    results = Exporter(d, str(tmp_path), log=quiet).run(entries)
+    tp = plan_trash(entries, results)
+    assert not {f[0] for f in tp.files} & {"doc1", "img1", "sh1", "A", "B"}
+    assert "O" in {f[0] for f in tp.files}               # lo demás sigue igual
+
+
+def test_exclude_nested_by_path_and_name_only_at_top():
+    d = scenario()
+    entries = plan(d, exclude=("Mi unidad/Universidad/Tema: 1/2?",))
+    assert "Mi unidad/Universidad/Tema_ 1_2_/Notas.xlsx" not in by_local(entries)
+    assert "Mi unidad/Universidad/foto.jpg" in by_local(entries)
+    # un nombre suelto solo vale para el primer nivel: "Tema: 1/2?" está dentro de Universidad
+    entries = plan(d, exclude=("Tema: 1/2?",))
+    assert "Mi unidad/Universidad/Tema_ 1_2_/Notas.xlsx" in by_local(entries)
+
+
+def test_top_folders_and_replan():
+    d = scenario()
+    p = Planner(d, Options(), log=quiet)
+    p.collect()
+    names = [n for n, _, _ in p.top_folders()]
+    assert names == ["Universidad"]
+    first = p.place()
+    p.opt.exclude = ("Universidad",)
+    second = p.place()
+    assert len(second) < len(first) and d.calls.count(("list", None, "trashed = false")) == 1
+
+
+def test_ask_exclusions(monkeypatch):
+    from drive_exporter import cli
+    folders = [("Colab Notebooks", 4, 0), ("Practiques", 123, 10), ("w", 10, 5)]
+    answers = iter(["9", "1,3"])
+    monkeypatch.setattr("builtins.input", lambda *_: next(answers))
+    assert cli.ask_exclusions(folders, []) == ["Colab Notebooks", "w"]
+    monkeypatch.setattr("builtins.input", lambda *_: "")
+    assert cli.ask_exclusions(folders, ["W"]) == ["w"], "Enter = lo de la última vez"
+    monkeypatch.setattr("builtins.input", lambda *_: "0")
+    assert cli.ask_exclusions(folders, ["w"]) == []
+
+
+def test_exclude_follows_shortcuts_inside():
+    from tests.fake_drive import FOLDER, SHORTCUT
+    d = scenario()
+    # Una carpeta mía "w" con un acceso directo a la carpeta compartida de Ana
+    d.add("W", "w", FOLDER)
+    d.add("cut3", "Ana", SHORTCUT, parents=["W"], shortcutDetails={"targetId": "S", "targetMimeType": FOLDER})
+    d.files["cut1"]["parents"] = ["W"]   # el otro acceso directo también vive en w
+    normal = plan(d)
+    assert any(e.local.startswith("Mi unidad/w/") for e in normal if e.local)
+    entries = plan(d, exclude=("w",))
+    # lo de Ana no reaparece en Compartido conmigo
+    assert not any(e.file_id in ("S", "s1") and e.kind != "skip" for e in entries)
+    notes = [e.note for e in entries if e.file_id == "S"]
+    assert notes and "excluiste" in notes[0]

@@ -58,6 +58,10 @@ class Options:
     layout: str = "carpetas"       # carpetas | fecha
     shortcuts: str = "seguir"      # seguir | ignorar
     folder_id: str = None          # exportar solo esta carpeta
+    # Carpetas (o archivos) que se quedan en Drive sin descargar. Un nombre suelto
+    # ("w") se refiere a lo que está en el primer nivel de una sección (Mi unidad,
+    # Compartido conmigo…); para algo más profundo, la ruta de Drive ("Mi unidad/Practiques/2020").
+    exclude: tuple = ()
 
 
 def _sort_key(item):
@@ -111,6 +115,34 @@ class Planner:
     # ---------- plan ----------
     def build(self):
         self.collect()
+        return self.place()
+
+    def top_folders(self):
+        """Carpetas del primer nivel de Mi unidad: [(nombre, archivos, bytes)], para elegir cuáles excluir."""
+        def walk(fid):
+            n, b = 0, 0
+            for c in self.children.get(fid, []):
+                if c.get("mimeType") == formats.FOLDER:
+                    cn, cb = walk(c["id"])
+                    n, b = n + cn, b + cb
+                else:
+                    n += 1
+                    try:
+                        b += int(c.get("size") or 0)
+                    except (TypeError, ValueError):
+                        pass
+            return n, b
+        out = []
+        for c in self.children.get(self.root_id, []):
+            if c.get("mimeType") == formats.FOLDER:
+                n, b = walk(c["id"])
+                out.append((c.get("name", ""), n, b))
+        return sorted(out, key=lambda x: x[0].lower())
+
+    def place(self):
+        """Decide dónde va cada cosa (se puede repetir con otras opciones sin volver a listar Drive)."""
+        self.placed, self.visited, self.names, self.entries = {}, set(), NameRegistry(), []
+        self.excluded = {}     # id -> ruta de Drive de la exclusión que lo cubre
         if self.opt.folder_id:
             self._plan_single_folder(self.opt.folder_id)
         else:
@@ -171,12 +203,50 @@ class Planner:
         year = mod[:4]
         return f"{section}/{year}/{mod}"
 
+    def _excluded(self, item, section, drive_dir, name, drive_path):
+        for pat in self.opt.exclude or ():
+            p = pat.strip().strip("/").lower()
+            if not p:
+                continue
+            if p == item.get("id", "").lower() or p == drive_path.lower():
+                return True
+            if "/" not in p and drive_dir == section and name.lower() == p:
+                return True
+        return False
+
+    def _mark_excluded(self, item, where, depth=0):
+        """Marca como excluido todo lo que cuelga de item, incluido aquello a lo que apuntan
+        sus accesos directos (si no, aparecería otra vez en «Compartido conmigo»)."""
+        fid = item["id"]
+        if fid in self.excluded or depth > 50:
+            return
+        self.excluded[fid] = where
+        if item.get("mimeType") == formats.SHORTCUT:
+            target = self.items.get((item.get("shortcutDetails") or {}).get("targetId"))
+            if target:
+                self._mark_excluded(target, where, depth + 1)
+        for child in self.children.get(fid, []):
+            self._mark_excluded(child, where, depth + 1)
+
     def _place(self, item, section, drive_dir, local_dir, display_name=None):
         """Añade al plan un archivo o carpeta (y su contenido) en local_dir."""
         fid = item["id"]
         mime = item.get("mimeType", "")
         name = display_name or item.get("name") or "sin nombre"
         drive_path = f"{drive_dir}/{name}"
+
+        if self._excluded(item, section, drive_dir, name, drive_path):
+            # Ni se descarga ni se toca: su contenido tampoco se recorre
+            self.visited.add(fid)
+            self._mark_excluded(item, drive_path)
+            self.entries.append(Entry("skip", fid, name, mime, section, drive_path, item=item,
+                                      note="Excluida por ti: se queda en Drive"))
+            return
+        if fid in self.excluded:
+            self.visited.add(fid)
+            self.entries.append(Entry("skip", fid, name, mime, section, drive_path, item=item,
+                                      note=f"Se queda en Drive: está dentro de lo que excluiste ({self.excluded[fid]})"))
+            return
 
         if mime == formats.SHORTCUT:
             self.visited.add(fid)

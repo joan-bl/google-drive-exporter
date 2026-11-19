@@ -112,6 +112,9 @@ def build_parser():
     p.add_argument("--origen", action="append", choices=list(SOURCES),
                    help="qué exportar; se puede repetir. Por defecto: todo (mi-unidad, compartido, unidades)")
     p.add_argument("--carpeta", help="exportar solo esta carpeta (ID o enlace de Drive)")
+    p.add_argument("--excluir", action="append", default=[], metavar="CARPETA",
+                   help="no descargar ni tocar esta carpeta; se puede repetir. Un nombre ('w') = carpeta "
+                        "del primer nivel; para más dentro, la ruta ('Mi unidad/Practiques/2020')")
     g = p.add_argument_group("formatos de los archivos de Google (separados por comas)")
     for kind in ("doc", "sheet", "slides", "drawing"):
         g.add_argument(f"--{kind}", help=f"por defecto {','.join(formats.DEFAULT_FORMATS[kind])}; "
@@ -162,6 +165,33 @@ def wizard(args):
     return args
 
 
+def ask_exclusions(folders, remembered):
+    """Muestra las carpetas de Mi unidad y pregunta cuáles se quedan en Drive."""
+    if not folders:
+        return list(remembered)
+    print("\n📂 Carpetas de Mi unidad:")
+    rem = {r.lower() for r in remembered}
+    for i, (name, n, b) in enumerate(folders, 1):
+        mark = "  [excluida la última vez]" if name.lower() in rem else ""
+        print(f"  {i:>2}) {name}  ({n} archivos, {human_size(b)}){mark}")
+    default = ",".join(str(i) for i, (name, _, _) in enumerate(folders, 1) if name.lower() in rem)
+    hint = f" [{default}]" if default else ""
+    while True:
+        ans = input("¿Cuáles NO quieres descargar (se quedan en Drive sin tocar)? "
+                    f"Números separados por comas, 0 = ninguna{hint}: ").strip()
+        if not ans:
+            ans = default
+        if ans in ("", "0"):
+            return []
+        try:
+            nums = sorted({int(x) for x in ans.replace(" ", "").split(",") if x})
+            if all(1 <= k <= len(folders) for k in nums):
+                return [folders[k - 1][0] for k in nums]
+        except ValueError:
+            pass
+        print("No lo entiendo: escribe números de la lista separados por comas, por ejemplo 2,5.")
+
+
 def main(argv=None):
     _setup_console()
     parser = build_parser()
@@ -207,8 +237,20 @@ def main(argv=None):
         shortcuts=args.accesos_directos,
         folder_id=folder_id_from(args.carpeta) if args.carpeta else None,
     )
+    email = who.get("emailAddress", "")
+    cfg = _load_config()
+    remembered = cfg.get("excluir", {}).get(email, [])
     planner = Planner(client, opts, log=log)
-    entries = planner.build()
+    planner.collect()
+    if args.excluir:
+        opts.exclude = tuple(args.excluir)
+    elif interactive and not args.carpeta:
+        opts.exclude = tuple(ask_exclusions(planner.top_folders(), remembered))
+        cfg.setdefault("excluir", {})[email] = list(opts.exclude)
+        _save_config(cfg)
+    if opts.exclude:
+        log("🚫 Se quedan en Drive sin tocar: " + ", ".join(opts.exclude))
+    entries = planner.place()
     summary = summarize(entries)
 
     log("\n📋 Plan")

@@ -66,7 +66,12 @@ def plan_trash(entries, results, assume_ok=False):
     for e in entries:
         if e.kind in ("skip", "dup"):
             blocked_paths.append(e.drive_path)
-            _keep(plan, "no se descargó (formulario, acceso directo, repetido…)" if e.kind == "skip" else "repetido en otro sitio")
+            if e.kind == "dup":
+                _keep(plan, "está repetido en otro sitio")
+            elif "xclu" in e.note:
+                _keep(plan, "lo excluiste (se queda en Drive)")
+            else:
+                _keep(plan, "no se puede descargar (formulario, acceso directo roto…)")
 
     folders = [e for e in entries if e.kind == "folder"]
     folders.sort(key=lambda e: e.drive_path.count("/"), reverse=True)

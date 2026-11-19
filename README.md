@@ -11,6 +11,7 @@ Copia **todo tu Google Drive al ordenador**, ordenado y con sus fechas, sin el l
 - **Comprobado**: verifica la suma MD5 de cada archivo descargado.
 - **Índice con todo**: un `_informe.html` que se puede buscar y ordenar por fecha, y un `_indice.csv` para Excel. Incluye lo que no se pudo bajar y por qué (formularios, archivos con la descarga desactivada…).
 - **Solo lectura**: para exportar pide a Google permiso **solo para leer**.
+- **Excluir carpetas**: el asistente te enseña las carpetas de Mi unidad y eliges cuáles se quedan en Drive sin tocar. Lo recuerda para la próxima vez.
 - **Dejar Drive limpio (opcional)**: al terminar te pregunta si quieres mandar a la papelera de Drive lo que ya tienes descargado, para no tener dos copias que acaben siendo distintas. Solo lo **tuyo** y descargado **sin errores**; una carpeta solo si todo lo de dentro se ha descargado; antes de cada archivo comprueba que no ha cambiado en Drive. Se recupera durante 30 días.
 
 ## ¿Por qué no Google Takeout?
@@ -86,6 +87,7 @@ python -m drive_exporter --solo-google           # solo Docs/Hojas/Presentacione
 | `-o`, `--salida` | Carpeta de destino (por defecto `exports`) |
 | `--origen` | `mi-unidad`, `compartido` o `unidades`. Se puede repetir. Por defecto, todo |
 | `--carpeta` | Solo una carpeta (ID o enlace) |
+| `--excluir` | Carpeta que se queda en Drive sin descargar ni tocar. Se puede repetir. Un nombre (`w`) es una carpeta del primer nivel; para algo más profundo, su ruta (`"Mi unidad/Practiques/2020"`). Lo que apunten sus accesos directos también se excluye |
 | `--doc`, `--sheet`, `--slides`, `--drawing` | Formatos de exportación, separados por comas |
 | `--solo-google` | No bajar PDFs, fotos, etc.; solo convertir los archivos de Google |
 | `--orden` | `carpetas` (como en Drive) o `fecha` (`AAAA/AAAA-MM`) |
@@ -154,6 +156,7 @@ drive_exporter/
 
 ## Historial
 
+- **v2.2 (noviembre 2026)**: excluir carpetas (con lo que apunten sus accesos directos); el asistente las lista y recuerda la elección.
 - **v2.1 (noviembre 2026)**: opción de dejar Drive limpio al terminar (papelera solo de lo tuyo y bien descargado); el asistente pide `credentials.json` al principio y lo recuerda.
 - **v2.0 (noviembre 2026)**: reescrito entero. Exporta Mi unidad, Compartido conmigo y unidades compartidas; baja también los archivos normales; conserva las fechas; sigue accesos directos; actualización incremental; verificación MD5; índice HTML/CSV; permiso de solo lectura; descargas en paralelo; asistente y `exportar.bat`. Arregla que la v1 solo veía los 100 primeros elementos de cada carpeta.
 - **v1 (diciembre 2024)**: script que exportaba los Docs, Hojas y Presentaciones de una carpeta.
